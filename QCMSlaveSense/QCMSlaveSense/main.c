@@ -10,6 +10,7 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include "../../CommonLibs/i2c_atmega.h"
+#include "../../CommonLibs/commonValues.h"
 
 #define LE_HIGH		PORTB|=1<<PB0
 #define MR_HIGH		PORTB|=1<<PB1
@@ -26,29 +27,6 @@
 #define Z2			((PINC>>PC6)&0x01)
 #define Z3			((PINC>>PC7)&0x01)
 
-enum commandSet
-{
-	NOP = 0,
-	SEND_MEASUREMENT_DATA,
-	SEND_THERMAL_DATA,
-	TEST_COMM,
-	TURN_ON_RTC,
-	SET_RTC_OUTPUT,
-	SLAVE_SAY_READY
-};
-
-typedef union freqData
-{
-	volatile uint32_t freqVal;
-	volatile uint8_t dataTrain[4];
-}freqData_t;
-
-typedef union thermData
-{
-	volatile uint16_t thermalVal;
-	volatile uint8_t dataTrain[2];
-}thermData_t;
-
 volatile freqData_t freqDataToSend;
 volatile thermData_t thermalDataToSend;
 
@@ -57,12 +35,25 @@ volatile uint32_t freqBuff0 = 0, freqBuff1 = 0, freqBuff2 = 0;
 //==============================I2C FUNCTIONS=============================================
 void setSpecificI2c_prepComm (uint8_t cmd, uint8_t* payLoad, uint8_t payLoadSize)
 {
-	
+	switch(cmd)
+	{
+		case SLAVE_SAY_READY:
+		{
+			s_remainingData = payLoadSize - 1;
+			s_data = 0;
+		}
+	}
 }
 
 void setSpecificI2c_restartDataDir(uint8_t cmd)
 {
-	
+	switch(cmd)
+	{
+		case SLAVE_SAY_READY:
+		{
+			TWDR |= WRITE;
+		}
+	}
 }
 
 void i2c_processCommand(uint8_t cmd)
@@ -70,14 +61,14 @@ void i2c_processCommand(uint8_t cmd)
 	uint8_t i = 0;
 	switch (cmd)
 	{
-		case SEND_MEASUREMENT_DATA:
+		case SLAVE_SEND_MEASUREMENT_DATA:
 		{
 			for (i = 0; i < sizeof(freqData_t); i++)
 			{
 				s_payLoad[i] = freqDataToSend.dataTrain[i];
 			}
 		}break;
-		case SEND_THERMAL_DATA:
+		case SLAVE_SEND_THERMAL_DATA:
 		{
 			for (i = 0; i < sizeof(thermData_t); i++)
 			{
@@ -102,7 +93,13 @@ void initExternalInt (void)
 
 void initADC ()
 {
-	//TODO : Define this
+	ADMUX = 0x00;
+	ADCSRA = 0x8f;
+}
+
+void readADC ()
+{
+	ADCSRA |= (1<<ADSC);
 }
 
 ISR(INT0_vect)
@@ -125,8 +122,13 @@ ISR(INT0_vect)
 	freqBuff0 = 0;
 	freqBuff1 = 0;
 	freqBuff2 = 0;
+	readADC();
 }
 
+ISR(ADC_vect)
+{
+	thermalDataToSend.thermalVal = ADCW;
+}
 int main(void)
 {
 	uint8_t RTCTurnOnData[2] = {0x00,0x00};
@@ -146,15 +148,15 @@ int main(void)
 	_delay_ms(100);
 	
 	//Turn on RTC and set the output to 1Hz
-	i2c_prepComm(0x68,TURN_ON_RTC,RTCTurnOnData,sizeof(RTCTurnOnData));
+	i2c_prepComm(0x68,RTC_TURN_ON,RTCTurnOnData,sizeof(RTCTurnOnData));
 	i2c_start();
 	while(s_isI2CBusy);
-	i2c_prepComm(0x68,SET_RTC_OUTPUT,RTCOutEnableData,sizeof(RTCOutEnableData));
+	i2c_prepComm(0x68,RTC_SET_OUTPUT,RTCOutEnableData,sizeof(RTCOutEnableData));
 	i2c_start();
 	while(s_isI2CBusy);
 	
 	//All operation will begin after this command is sent to Master Controller
-	i2c_prepComm(0x50,SLAVE_SAY_READY,0,0);
+	i2c_prepComm(0x50,SLAVE_SAY_READY,0,1);
 	i2c_start();
 	while(s_isI2CBusy);
 	
