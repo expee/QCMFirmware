@@ -37,19 +37,14 @@ typedef struct dataToSend
 
 volatile dataToSend_t data;
 
-volatile uint8_t s_firstUSBTransmission = FALSE;
 volatile uint8_t s_isSlavesReady = FALSE;
 
 USB_PUBLIC usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
 	usbRequest_t *request = (void*) data;
 
-	if (!s_firstUSBTransmission)
-	{
-		//Set timer here so that the USB comm will not happen the same time as i2c communication
-		setTimer1Value();
-		s_firstUSBTransmission = TRUE;
-	}
+	//Set timer here so that the USB comm will not happen the same time as i2c communication
+	setTimer1Value(500);
 
 	switch (request->bRequest)
 	{
@@ -67,11 +62,11 @@ void setSpecificI2c_prepComm (uint8_t cmd, uint8_t* payLoad, uint8_t payLoadSize
 	uint8_t i = 0;
 	switch (cmd)
 	{
-		case SEND_MEASUREMENT_DATA:
+		case SLAVE_SEND_MEASUREMENT_DATA:
 		{
 			s_remainingData = payLoadSize;
 		}break;
-		case SEND_THERMAL_DATA:
+		case SLAVE_SEND_THERMAL_DATA:
 		{
 			s_remainingData = payLoadSize;
 		}break;
@@ -106,11 +101,11 @@ void setSpecificI2c_restartDataDir(uint8_t cmd)
 {
 	switch (cmd)
 	{
-		case SEND_MEASUREMENT_DATA:
+		case SLAVE_SEND_MEASUREMENT_DATA:
 		{
 			TWDR |= READ;
 		}break;
-		case SEND_THERMAL_DATA:
+		case SLAVE_SEND_THERMAL_DATA:
 		{
 			TWDR |= READ;
 		}break;
@@ -134,30 +129,33 @@ void i2c_processCommand(uint8_t cmd)
 
 void initTimer1 ()
 {
-	
+	TCCR1A = 0x00;
 }
 
 void setTimer1Value(uint16_t timerVal)
 {
-	
+	//timerVal in millisecond
+	TCCR1B = 0x04;
+	TCNT1 = 0xffff - (uint16_t)(((float)timerVal/1000.0)/(256.0/(float)F_CPU));
 }
 
-void turnOffTimer1 ()
+void turnOffTimer1()
 {
-	
+	TCCR1B = 0x00;
+	TCNT1 = 0x00;
 }
 
 ISR(TIMER1_OVF_vect)
 {
-	i2c_prepComm(0x51,SEND_MEASUREMENT_DATA,0,sizeof(data.sensor));
+	i2c_prepComm(0x51,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(data.sensor));
 	i2c_start();
 	while(s_isI2CBusy);
 	data.sensor.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SEND_MEASUREMENT_DATA,0,sizeof(data.ref));
+	i2c_prepComm(0x52,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(data.ref));
 	i2c_start();
 	while(s_isI2CBusy);
 	data.ref.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SEND_THERMAL_DATA,0,sizeof(data.temp));
+	i2c_prepComm(0x52,SLAVE_SEND_THERMAL_DATA,0,sizeof(data.temp));
 	i2c_start();
 	while(s_isI2CBusy);
 	data.temp.thermalVal = *((uint16_t *) s_dataStorage);
@@ -168,6 +166,7 @@ ISR(TIMER1_OVF_vect)
 int main(void)
 {
 	uint8_t i = 0;
+	initTimer1();
 	i2c_Init(300000,0x50);
 	sei();
 	while(!s_isSlavesReady);
