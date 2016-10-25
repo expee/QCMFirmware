@@ -12,6 +12,15 @@
 #include "usbdrv/usbconfig.h"
 #include "usbdrv/usbdrv.h"
 #include "../../CommonLibs/i2c_atmega.h"
+#include "../../CommonLibs/commonValues.h"
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
 
 enum
 {
@@ -19,26 +28,29 @@ enum
 	SEND_DATA
 }commandFromHost;
 
-enum
-{
-	NO_COMMAND = 0,
-	SEND_MEASUREMENT_DATA,
-	SEND_THERMAL_DATA,
-	TEST_COMM
-}i2cCommand;
-
 typedef struct dataToSend
 {
-	uint32_t sensorFreqVal;
-	uint32_t refFreqVal;
-	uint8_t tempVal;
+	freqData_t sensor;
+	freqData_t ref;
+	thermData_t temp;
 }dataToSend_t;
 
 volatile dataToSend_t data;
 
+volatile uint8_t s_firstUSBTransmission = FALSE;
+volatile uint8_t s_isSlavesReady = FALSE;
+
 USB_PUBLIC usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
 	usbRequest_t *request = (void*) data;
+
+	if (!s_firstUSBTransmission)
+	{
+		//Set timer here so that the USB comm will not happen the same time as i2c communication
+		setTimer1Value();
+		s_firstUSBTransmission = TRUE;
+	}
+
 	switch (request->bRequest)
 	{
 		case SEND_DATA:
@@ -111,30 +123,55 @@ void setSpecificI2c_restartDataDir(uint8_t cmd)
 
 void i2c_processCommand(uint8_t cmd)
 {
+	switch(cmd)
+	{
+		case SLAVE_SAY_READY:
+		{
+			s_isSlavesReady = TRUE;
+		}break;
+	}
+}
+
+void initTimer1 ()
+{
 	
 }
 
-ISR(TIMER0_OVF_vect)
+void setTimer1Value(uint16_t timerVal)
 {
-	i2c_prepComm(0x51,SEND_MEASUREMENT_DATA,0,sizeof(data.sensorFreqVal));
+	
+}
+
+void turnOffTimer1 ()
+{
+	
+}
+
+ISR(TIMER1_OVF_vect)
+{
+	i2c_prepComm(0x51,SEND_MEASUREMENT_DATA,0,sizeof(data.sensor));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.sensorFreqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SEND_MEASUREMENT_DATA,0,sizeof(data.refFreqVal));
+	data.sensor.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
+	i2c_prepComm(0x52,SEND_MEASUREMENT_DATA,0,sizeof(data.ref));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.refFreqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SEND_THERMAL_DATA,0,sizeof(data.tempVal));
+	data.ref.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
+	i2c_prepComm(0x52,SEND_THERMAL_DATA,0,sizeof(data.temp));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.tempVal = *((uint8_t *) s_dataStorage);
-	//TODO: reset the timer!!
+	data.temp.thermalVal = *((uint16_t *) s_dataStorage);
+
+	turnOffTimer1();	//turn off timer here, wait for another USB transmission before ask new data from slaves.
 }
 
 int main(void)
 {
 	uint8_t i = 0;
+	i2c_Init(300000,0x50);
 	sei();
+	while(!s_isSlavesReady);
+
 	wdt_enable(WDTO_1S);
 	usbInit();
 	usbDeviceDisconnect();
