@@ -9,6 +9,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include "../../CommonLibs/i2c_atmega.h"
+#include "../../CommonLibs/commonValues.h"
 
 #define LE_HIGH		PORTB|=1<<PB0
 #define MR_HIGH		PORTB|=1<<PB1
@@ -25,21 +26,8 @@
 #define Z2			((PINC>>PC6)&0x01)
 #define Z3			((PINC>>PC7)&0x01)
 
-enum commandSet
-{
-	NOP = 0,
-	SEND_MEASUREMENT_DATA,
-	SEND_THERMAL_DATA,
-	TEST_COMM
-};
 
-typedef union commData
-{
-	volatile uint32_t freqVal;
-	volatile uint8_t dataTrain[4];
-}commData_t;
-
-volatile commData_t dataToSend;
+volatile freqData_t refFreq;
 
 volatile uint32_t freqBuff0 = 0, freqBuff1 = 0, freqBuff2 = 0;
 
@@ -59,14 +47,14 @@ void i2c_processCommand(uint8_t cmd)
 	uint8_t i = 0;
 	switch (cmd)
 	{
-		case SEND_MEASUREMENT_DATA:
+		case SLAVE_SEND_MEASUREMENT_DATA:
 		{
-			for (i = 0; i < sizeof(commData_t); i++)
+			for (i = 0; i < sizeof(freqData_t); i++)
 			{
-				s_payLoad[i] = dataToSend.dataTrain[i];
+				s_payLoad[i] = refFreq.dataTrain[i];
 			}
 		}break;
-		case SEND_THERMAL_DATA:
+		case SLAVE_SEND_THERMAL_DATA:
 		{
 			//NOP
 		}break;
@@ -78,9 +66,6 @@ void i2c_processCommand(uint8_t cmd)
 }
 //==============================I2C FUNCTIONS=============================================
 
-//==============================TIMER FUNCTIONS=============================================
-
-//==============================TIMER FUNCTIONS=============================================
 
 void initExternalInt (void)
 {
@@ -106,7 +91,7 @@ ISR(INT0_vect)
 		freqBuff1|=Z2<<i;
 		freqBuff2|=Z3<<i;
 	}
-	dataToSend.freqVal = (freqBuff2 << 16)|(freqBuff1 << 8)|(freqBuff0);
+	refFreq.freqVal = (freqBuff2 << 16)|(freqBuff1 << 8)|(freqBuff0);
 	freqBuff0 = 0;
 	freqBuff1 = 0;
 	freqBuff2 = 0;
@@ -122,8 +107,11 @@ int main(void)
 	PORTB = 0x00;
 	PORTC = 0x00;
 	PORTD = 0x04;	//Enable pull-up resistor on PD2
-	sei();
+
 	i2c_Init(300000,0x51);
+	initExternalInt();
+	sei();
+	
 	/* Replace with your application code */
 	while (1)
 	{
