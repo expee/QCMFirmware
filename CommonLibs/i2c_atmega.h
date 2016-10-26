@@ -192,7 +192,7 @@ void i2c_saveData()
 	for(; i < MAX_DATA_LENGTH; i++) s_dataStorage [i] = s_payLoad[i];
 }
 
-ISR (TWI_vect, ISR_BLOCK)
+ISR (TWI_vect)
 {
 	switch(TWSR&0xf8)
 	{

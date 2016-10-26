@@ -14,6 +14,9 @@
 #include "../../CommonLibs/i2c_atmega.h"
 #include "../../CommonLibs/commonValues.h"
 
+#define  LED_ON		PORTB|=1<<PB0
+#define  LED_OFF	PORTB&=~(1<<PB0)
+
 #ifndef TRUE
 #define TRUE 1
 #endif
@@ -24,8 +27,8 @@
 
 enum
 {
-	NOP,
-	SEND_DATA
+	USB_NOP,
+	USB_SEND_DATA
 }commandFromHost;
 
 typedef struct dataToSend
@@ -35,28 +38,50 @@ typedef struct dataToSend
 	thermData_t temp;
 }dataToSend_t;
 
-volatile dataToSend_t data;
+volatile dataToSend_t USBData;
 
 volatile uint8_t s_isSlavesReady = FALSE;
 
-USB_PUBLIC usbMsgLen_t usbFunctionSetup(uchar data[8])
+volatile uint8_t LEDDelayCounter = 0;
+
+void initTimer1 ()
 {
-	usbRequest_t *request = (void*) data;
-
-	//Set timer here so that the USB comm will not happen the same time as i2c communication
-	setTimer1Value(500);
-
-	switch (request->bRequest)
-	{
-		case SEND_DATA:
-			{
-				usbMsgPtr = (usbMsgPtr_t) &data;
-				return sizeof(data);
-			}break;
-	}
-	return 0;
+	TCCR1A = 0x00;
+	TIMSK |= (1<<TOIE1); 
 }
 
+void initTimer0 ()
+{
+	TCCR0 = 0x00;
+	TCNT0 = 0x00;
+	TIMSK |= (1<<TOIE0);
+}
+
+void startTimer0 ()
+{
+	TCCR0 = 0x05;
+}
+
+void stopTimer0 ()
+{
+	TCCR0 = 0x00;
+	TCNT0 = 0x00;
+}
+
+void setTimer1Value(uint16_t timerVal)
+{
+	//timerVal in millisecond
+	TCCR1B = 0x04;
+	TCNT1 = 0xffff - (uint16_t)(((float)timerVal/1000.0)/(256.0/(float)F_CPU));
+}
+
+void turnOffTimer1()
+{
+	TCCR1B = 0x00;
+	TCNT1 = 0x00;
+}
+
+//==============================I2C FUNCTIONS=============================================
 void setSpecificI2c_prepComm (uint8_t cmd, uint8_t* payLoad, uint8_t payLoadSize)
 {
 	uint8_t i = 0;
@@ -126,46 +151,70 @@ void i2c_processCommand(uint8_t cmd)
 		}break;
 	}
 }
+//==============================I2C FUNCTIONS=============================================
 
-void initTimer1 ()
+USB_PUBLIC usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
-	TCCR1A = 0x00;
+	usbRequest_t *request = (void*) data;
+
+	//Set timer here so that the USB comm will not happen the same time as i2c communication
+	setTimer1Value(500);
+	
+	LED_ON;
+	startTimer0();	//for LED blinking effect
+	
+	switch (request->bRequest)
+	{
+		case USB_SEND_DATA:
+		{
+			usbMsgPtr = (usbMsgPtr_t) &USBData;
+			return sizeof(USBData);
+		}break;
+	}
+	return 0;
 }
 
-void setTimer1Value(uint16_t timerVal)
+ISR(TIMER1_OVF_vect, ISR_NOBLOCK)
 {
-	//timerVal in millisecond
-	TCCR1B = 0x04;
-	TCNT1 = 0xffff - (uint16_t)(((float)timerVal/1000.0)/(256.0/(float)F_CPU));
-}
-
-void turnOffTimer1()
-{
-	TCCR1B = 0x00;
-	TCNT1 = 0x00;
-}
-
-ISR(TIMER1_OVF_vect)
-{
-	i2c_prepComm(0x51,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(data.sensor));
+	i2c_prepComm(0x51,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(USBData.sensor));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.sensor.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(data.ref));
+	USBData.sensor.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
+	i2c_prepComm(0x52,SLAVE_SEND_MEASUREMENT_DATA,0,sizeof(USBData.ref));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.ref.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
-	i2c_prepComm(0x52,SLAVE_SEND_THERMAL_DATA,0,sizeof(data.temp));
+	USBData.ref.freqVal = *((uint32_t *) s_dataStorage);	//TYPE ALIASING WARNING!!
+	i2c_prepComm(0x52,SLAVE_SEND_THERMAL_DATA,0,sizeof(USBData.temp));
 	i2c_start();
 	while(s_isI2CBusy);
-	data.temp.thermalVal = *((uint16_t *) s_dataStorage);
+	USBData.temp.thermalVal = *((uint16_t *) s_dataStorage);
 
 	turnOffTimer1();	//turn off timer here, wait for another USB transmission before ask new data from slaves.
+	
+
+}
+
+ISR(TIMER0_OVF_vect, ISR_NOBLOCK)
+{
+	LEDDelayCounter++;
+	if(LEDDelayCounter > 22)
+	{
+		LED_OFF;
+		LEDDelayCounter = 0;
+		stopTimer0();
+	}
 }
 
 int main(void)
 {
 	uint8_t i = 0;
+	PORTB = 0x00;
+	PORTC = 0x00;
+	PORTD = 0x00;
+	DDRB = 0x01;
+	DDRC = 0x00;
+	DDRD = 0x00;
+	initTimer0();
 	initTimer1();
 	i2c_Init(300000,0x50);
 	sei();

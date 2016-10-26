@@ -66,7 +66,6 @@ void i2c_processCommand(uint8_t cmd)
 }
 //==============================I2C FUNCTIONS=============================================
 
-
 void initExternalInt (void)
 {
 	//INT0 triggers on falling edge

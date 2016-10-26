@@ -32,16 +32,84 @@ volatile thermData_t thermalDataToSend;
 
 volatile uint32_t freqBuff0 = 0, freqBuff1 = 0, freqBuff2 = 0;
 
+void initExternalInt (void)
+{
+	//INT0 triggers on falling edge
+	MCUCR |= (1<<ISC01)|(1<<ISC00);
+	//Activate INT0 Interrupt
+	GICR |=(1<<INT0);
+}
+
+void initADC ()
+{
+	ADMUX = 0x00;
+	ADCSRA = 0x8f;
+}
+
+void readADC ()
+{
+	ADCSRA |= (1<<ADSC);
+}
+
 //==============================I2C FUNCTIONS=============================================
 void setSpecificI2c_prepComm (uint8_t cmd, uint8_t* payLoad, uint8_t payLoadSize)
 {
+	uint8_t i = 0;
 	switch(cmd)
 	{
 		case SLAVE_SAY_READY:
 		{
 			s_remainingData = payLoadSize - 1;
 			s_data = 0;
-		}
+		}break;
+		case RTC_TURN_ON:
+		{
+			if(payLoad)
+			{
+				for (i = 0; i < payLoadSize; ++i)
+				{
+					s_payLoad[i] = payLoad[i];
+				}
+				s_remainingData = payLoadSize - 1;
+				s_data = s_payLoad[0];
+			}
+			else
+			{
+				//Invalid payLoad pointer!!!
+				for (i = 0; i < payLoadSize; ++i)
+				{
+					//If you see this continuously in your comm line
+					//it means you gave an invalid payLoad pointer!!!
+					s_payLoad[i] = 0xaa;
+				}
+				s_remainingData = payLoadSize - 1;
+				s_data = s_payLoad[0];
+			}
+		}break;
+		case RTC_SET_OUTPUT:
+		{
+			if(payLoad)
+			{
+				for (i = 0; i < payLoadSize; ++i)
+				{
+					s_payLoad[i] = payLoad[i];
+				}
+				s_remainingData = payLoadSize - 1;
+				s_data = s_payLoad[0];
+			}
+			else
+			{
+				//Invalid payLoad pointer!!!
+				for (i = 0; i < payLoadSize; ++i)
+				{
+					//If you see this continuously in your comm line
+					//it means you gave an invalid payLoad pointer!!!
+					s_payLoad[i] = 0xaa;
+				}
+				s_remainingData = payLoadSize - 1;
+				s_data = s_payLoad[0];
+			}
+		}break;
 	}
 }
 
@@ -52,7 +120,15 @@ void setSpecificI2c_restartDataDir(uint8_t cmd)
 		case SLAVE_SAY_READY:
 		{
 			TWDR |= WRITE;
-		}
+		}break;
+		case RTC_TURN_ON:
+		{
+			TWDR |= WRITE;
+		}break;
+		case RTC_SET_OUTPUT:
+		{
+			TWDR |= WRITE;
+		}break;
 	}
 }
 
@@ -83,25 +159,6 @@ void i2c_processCommand(uint8_t cmd)
 }
 //==============================I2C FUNCTIONS=============================================
 
-void initExternalInt (void)
-{
-	//INT0 triggers on falling edge
-	MCUCR |= (1<<ISC01)|(1<<ISC00);
-	//Activate INT0 Interrupt
-	GICR |=(1<<INT0);
-}
-
-void initADC ()
-{
-	ADMUX = 0x00;
-	ADCSRA = 0x8f;
-}
-
-void readADC ()
-{
-	ADCSRA |= (1<<ADSC);
-}
-
 ISR(INT0_vect)
 {
 	LE_HIGH;
@@ -129,6 +186,7 @@ ISR(ADC_vect)
 {
 	thermalDataToSend.thermalVal = ADCW;
 }
+
 int main(void)
 {
 	uint8_t RTCTurnOnData[2] = {0x00,0x00};
